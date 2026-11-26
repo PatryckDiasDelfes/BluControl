@@ -1,0 +1,378 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function perfilAtual() {
+      return get(/databases/$(database)/documents/perfis/$(request.auth.uid)).data;
+    }
+    function perfilAutorizado() {
+      return request.auth != null && request.auth.token.email is string &&
+        perfilAtual().ativo == true && perfilAtual().email == request.auth.token.email.lower() &&
+        perfilAtual().perfil in ['operador', 'supervisor', 'administrador'];
+    }
+    function prazoSessao() {
+      let ref = /databases/$(database)/documents/configuracao/sessao;
+      return exists(ref) ? get(ref).data.dias : 7;
+    }
+    function membro() {
+      return perfilAutorizado() && request.auth.token.auth_time is int &&
+        request.time.toMillis() - request.auth.token.auth_time * 1000 < prazoSessao() * 86400000;
+    }
+    match /configuracao/sessao {
+      allow get: if perfilAutorizado();
+      allow create, update: if admin() && request.resource.data.keys().hasOnly(['dias']) &&
+        request.resource.data.dias is int && request.resource.data.dias >= 1 && request.resource.data.dias <= 30;
+    }
+    function supervisor() {
+      return membro() && perfilAtual().perfil in ['supervisor', 'administrador'];
+    }
+    function admin() {
+      return membro() && perfilAtual().perfil == 'administrador';
+    }
+    function texto(valor, maximo) {
+      return valor is string && valor.size() <= maximo;
+    }
+    function textoObrigatorio(valor, maximo) {
+      return texto(valor, maximo) && valor.size() > 0;
+    }
+    function camposAlterados() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+    function aberta(dados) {
+      return dados.get('finalizadaEm', null) == null && dados.get('arquivadaEm', null) == null && dados.get('excluindo', false) == false;
+    }
+    function caminhoLista(lista) {
+      return /databases/$(database)/documents/abas/$(lista);
+    }
+    function listaEmExclusao(lista) {
+      return get(caminhoLista(lista)).data.get('excluindo',false) == true;
+    }
+    function listaAberta(lista) {
+      return aberta(get(caminhoLista(lista)).data);
+    }
+    function caminhoSessao(lista, sessao) {
+      return /databases/$(database)/documents/abas/$(lista)/sessoes/$(sessao);
+    }
+    function sessaoAberta(lista, sessao) {
+      return get(caminhoSessao(lista, sessao)).data.get('excluindo', false) == false;
+    }
+    function revisaoSubiu(lista) {
+      return getAfter(caminhoLista(lista)).data.revisao == get(caminhoLista(lista)).data.get('revisao', 0) + 1;
+    }
+    function perfilValido(dados) {
+      return dados.keys().hasOnly(['nome', 'email', 'perfil', 'ativo', 'atualizadoEm', 'atualizadoPor']) &&
+        textoObrigatorio(dados.nome, 60) && textoObrigatorio(dados.email, 160) &&
+        dados.email == dados.email.lower() && dados.email.matches('^[^ @]+@[^ @]+$') && dados.ativo is bool &&
+        dados.perfil in ['operador', 'supervisor', 'administrador'] &&
+        dados.atualizadoEm == request.time && dados.atualizadoPor == request.auth.uid;
+    }
+
+    match /perfis/{uid} {
+      allow get: if request.auth != null && (request.auth.uid == uid || admin());
+      allow list: if admin();
+      // O primeiro administrador é vinculado no console do Firebase.
+      allow create, update: if admin() && request.auth.uid != uid && perfilValido(request.resource.data);
+    }
+
+    match /base/{item} {
+      allow read: if membro();
+      allow delete: if admin();
+    }
+    match /online/{uid} {
+      allow read: if membro();
+      allow create, update: if membro() && uid == request.auth.uid &&
+        request.resource.data.keys().hasOnly(['uid', 'nome', 'cor', 'at','listaId','sessaoId']) &&
+        texto(request.resource.data.get('listaId',''),160) && texto(request.resource.data.get('sessaoId',''),160) &&
+        request.resource.data.uid == uid && request.resource.data.nome == perfilAtual().nome &&
+        texto(request.resource.data.cor, 7) && request.resource.data.at == request.time;
+    }
+    match /auditoria/{evento} {
+      allow read: if supervisor();
+      allow create: if membro() && request.resource.data.keys().hasOnly(['uid', 'nome', 'texto', 'at']) &&
+        request.resource.data.uid == request.auth.uid && request.resource.data.nome == perfilAtual().nome &&
+        request.resource.data.at == request.time && textoObrigatorio(request.resource.data.texto, 1000);
+      allow delete: if admin();
+    }
+    match /chats/{chat}/msgs/{mensagem} {
+      allow read: if membro();
+      allow create: if membro() && request.resource.data.keys().hasOnly(['uid', 'nome', 'cor', 'texto', 'at', 'sistema']) &&
+        request.resource.data.uid == request.auth.uid && request.resource.data.at == request.time &&
+        textoObrigatorio(request.resource.data.texto, 3000) &&
+        (request.resource.data.get('sistema', false) == true ||
+          (request.resource.data.nome == perfilAtual().nome && texto(request.resource.data.cor, 7)));
+      allow delete: if admin();
+    }
+
+    function bipeNovoValido(dados) {
+      return dados.keys().hasOnly(['codigo', 'operador', 'uid', 'contadorId', 'cor', 'at', 'comentario',
+        'statusManual', 'foto', 'resultado', 'alerta', 'alertaTipo', 'eventoId']) &&
+        dados.uid == request.auth.uid && dados.operador == perfilAtual().nome && dados.at == request.time &&
+        textoObrigatorio(dados.codigo, 160) && texto(dados.cor, 7) && texto(dados.alertaTipo, 80) &&
+        dados.comentario == '' && dados.statusManual == '' && dados.foto == '' &&
+        dados.resultado in ['OK', 'PARCIAL', 'EXCEDIDO', 'NÃO ENCONTRADO', 'ALERTA'] && dados.alerta == (dados.resultado == 'ALERTA');
+    }
+    function detalheValido(lista) {
+      let estado = request.resource.data.get('statusManual', '');
+      let anterior = resource.data.get('statusManual', '');
+      return camposAlterados().hasOnly(['comentario', 'statusManual', 'foto']) &&
+        estado in ['', 'Verificado', 'Aguardando', 'Recontagem'] &&
+        texto(request.resource.data.get('comentario', ''), 3000) && texto(request.resource.data.get('foto', ''), 900000) &&
+        ((estado == 'Recontagem') == (anterior == 'Recontagem') || revisaoSubiu(lista)) &&
+        (supervisor() || (camposAlterados().hasOnly(['statusManual']) && estado == 'Recontagem'));
+    }
+    function temNovoBipe(lista, sessao, contador, dados) {
+      let bipe = /databases/$(database)/documents/abas/$(lista)/sessoes/$(sessao)/bipes/$(dados.ultimoBipeId);
+      let novo = getAfter(bipe).data;
+      return dados.keys().hasOnly(['codigo', 'quantidade', 'ultimoBipeId']) &&
+        dados.quantidade is int && dados.quantidade > 0 && !exists(bipe) &&
+        novo.uid == request.auth.uid && novo.codigo == dados.codigo && novo.contadorId == contador && novo.at == request.time;
+    }
+
+    function caminhoBipe(lista, sessao, id) {
+      return sessao == 'legado'
+        ? /databases/$(database)/documents/abas/$(lista)/bipes/$(id)
+        : /databases/$(database)/documents/abas/$(lista)/sessoes/$(sessao)/bipes/$(id);
+    }
+    function reciboValido(lista, sessao, id, dados) {
+      let ref = /databases/$(database)/documents/abas/$(lista)/atividadeBipagem/$(id);
+      return !('eventoId' in dados) || (dados.eventoId == id && !exists(ref) &&
+        getAfter(ref).data.uid == request.auth.uid && getAfter(ref).data.sessaoId == sessao &&
+        getAfter(ref).data.codigo == dados.codigo && getAfter(ref).data.tipo == 'bipe');
+    }
+    function leituraDoReciboValida(lista, id, dados) {
+      let ref = caminhoBipe(lista, dados.sessaoId, id);
+      let bipe = getAfter(ref).data;
+      return dados.tipo == 'bipe' && dados.keys().hasOnly(['tipo','uid','at','codigo','sessaoId']) &&
+        !exists(ref) && bipe.eventoId == id && bipe.uid == dados.uid && bipe.codigo == dados.codigo &&
+        bipe.at == request.time;
+    }
+    function desfazerPermitido(lista, sessao, id, dados) {
+      let recibo = /databases/$(database)/documents/abas/$(lista)/atividadeBipagem/$(id);
+      return membro() && listaAberta(lista) && revisaoSubiu(lista) && dados.uid == request.auth.uid &&
+        dados.get('eventoId','') == id && request.time.toMillis() - dados.at.toMillis() <= 120000 &&
+        getAfter(recibo).data.desfeitoEm == request.time;
+    }
+
+    match /abas/{lista}/{caminho=**}/bipes/{bipe} {
+      allow list: if membro();
+    }
+
+    match /abas/{lista} {
+      allow read: if membro();
+      allow create: if supervisor() && aberta(request.resource.data) && request.resource.data.criadoPor == perfilAtual().nome &&
+        request.resource.data.criadoPorUid == request.auth.uid && request.resource.data.criadoEm == request.time &&
+        request.resource.data.get('semBipesDiretosAntigos',false) is bool;
+      allow update: if (admin() && !camposAlterados().hasAny(['semBipesDiretosAntigos','criadoEm','criadoPor','criadoPorUid'])) ||
+        (supervisor() && aberta(resource.data) &&
+        camposAlterados().hasOnly(['revisao','revisaoAcompanhamento','revisaoLegados','revisaoCatalogo','versoes','catalogosPendentes','finalizadaEm']) &&
+        (!camposAlterados().hasAny(['finalizadaEm']) ||
+          (request.resource.data.finalizadaEm == request.time &&
+            getAfter(/databases/$(database)/documents/conferencias/$(lista)).data.finalizadaEm == request.time))) ||
+        (membro() && aberta(resource.data) && camposAlterados().hasOnly(['revisao', 'revisaoAcompanhamento']) &&
+          request.resource.data.revisao == resource.data.get('revisao', 0) + 1 &&
+          request.resource.data.revisaoAcompanhamento == resource.data.get('revisaoAcompanhamento', resource.data.get('revisao', 0)) + 1);
+      allow delete: if admin();
+
+      match /atividadeBipagem/{id} {
+        allow read: if membro();
+        allow create: if membro() && listaAberta(lista) &&
+          request.resource.data.uid == request.auth.uid && request.resource.data.at == request.time &&
+          ((request.resource.data.tipo == 'pausa' && request.resource.data.keys().hasOnly(['tipo','uid','at'])) ||
+            leituraDoReciboValida(lista,id,request.resource.data));
+        allow update: if membro() && listaAberta(lista) && revisaoSubiu(lista) &&
+          resource.data.uid == request.auth.uid && resource.data.tipo == 'bipe' &&
+          !('desfeitoEm' in resource.data) && camposAlterados().hasOnly(['desfeitoEm']) &&
+          request.resource.data.desfeitoEm == request.time &&
+          exists(caminhoBipe(lista,resource.data.sessaoId,id)) && !existsAfter(caminhoBipe(lista,resource.data.sessaoId,id));
+        allow delete: if admin() && get(caminhoLista(lista)).data.get('excluindo',false) == true;
+      }
+
+      match /bipes/{bipe} {
+        allow read: if membro();
+        allow create: if membro() && listaAberta(lista) && revisaoSubiu(lista) && bipeNovoValido(request.resource.data) &&
+          reciboValido(lista,'legado',bipe,request.resource.data) &&
+          request.resource.data.contadorId == '' && request.resource.data.resultado in ['ALERTA', 'NÃO ENCONTRADO'];
+        allow update: if membro() && listaAberta(lista) && detalheValido(lista);
+        allow delete: if (admin() && listaEmExclusao(lista)) || (supervisor() && listaAberta(lista) && revisaoSubiu(lista)) ||
+          desfazerPermitido(lista,'legado',bipe,resource.data);
+      }
+
+      match /revisoes/{revisao} {
+        function vinculoValido(dados) {
+          return !('vinculo' in dados) || (dados.vinculo is map && dados.vinculo.keys().hasOnly(['codigo','sessaoId','secao','titulo']) &&
+            textoObrigatorio(dados.vinculo.codigo,160) && textoObrigatorio(dados.vinculo.sessaoId,160) &&
+            texto(dados.vinculo.secao,180) && texto(dados.vinculo.titulo,240));
+        }
+        allow read: if membro();
+        allow create, update: if supervisor() && listaAberta(lista) && revisaoSubiu(lista) &&
+          request.resource.data.keys().hasOnly(['chave', 'origem', 'estado', 'nota', 'autor', 'uid', 'at','vinculo']) && vinculoValido(request.resource.data) &&
+          request.resource.data.uid == request.auth.uid && request.resource.data.autor == perfilAtual().nome &&
+          request.resource.data.at == request.time && textoObrigatorio(request.resource.data.chave, 700) &&
+          textoObrigatorio(request.resource.data.origem, 180) && texto(request.resource.data.nota, 300) &&
+          request.resource.data.estado in ['pendente', 'recontagem', 'resolvida'] &&
+          (request.resource.data.estado != 'resolvida' || request.resource.data.nota.size() > 0);
+        allow delete: if admin();
+      }
+
+      match /sessoes/{sessao} {
+        allow read: if membro();
+        allow create: if supervisor() && listaAberta(lista) && request.resource.data.get('excluindo', false) == false;
+        allow update: if admin() || (supervisor() && listaAberta(lista) && !camposAlterados().hasAny(['excluindo'])) ||
+          (membro() && listaAberta(lista) && resource.data.get('excluindo', false) == false &&
+            camposAlterados().hasOnly(['acompanharBipes']) && request.resource.data.acompanharBipes == true && revisaoSubiu(lista));
+        allow delete: if admin();
+
+        match /catalogos/{parte} {
+          allow read: if membro();
+          allow create, update: if supervisor() && listaAberta(lista);
+          allow delete: if admin();
+        }
+        match /bipes/{bipe} {
+          function contadorDesfeito() {
+            let contador = resource.data.get('contadorId','');
+            let ref = /databases/$(database)/documents/abas/$(lista)/sessoes/$(sessao)/contagens/$(contador);
+            return contador.matches('^[a-f0-9]{64}$') && getAfter(ref).data.ultimoBipeRemovidoId == bipe &&
+              getAfter(ref).data.quantidade == get(ref).data.quantidade - 1;
+          }
+          allow read: if membro();
+          allow create: if membro() && listaAberta(lista) && sessaoAberta(lista, sessao) && revisaoSubiu(lista) &&
+            bipeNovoValido(request.resource.data) && reciboValido(lista,sessao,bipe,request.resource.data) &&
+            request.resource.data.contadorId.matches('^[a-f0-9]{64}$') &&
+            getAfter(/databases/$(database)/documents/abas/$(lista)/sessoes/$(sessao)/contagens/$(request.resource.data.contadorId)).data.ultimoBipeId == bipe;
+          allow update: if membro() && listaAberta(lista) && sessaoAberta(lista, sessao) && detalheValido(lista);
+          allow delete: if (admin() && (listaEmExclusao(lista) || !sessaoAberta(lista,sessao))) ||
+            (listaAberta(lista) && sessaoAberta(lista,sessao) &&
+              ((supervisor() && revisaoSubiu(lista) && (resource.data.get('contadorId','') == '' || contadorDesfeito())) ||
+                (desfazerPermitido(lista,sessao,bipe,resource.data) && contadorDesfeito())));
+        }
+        match /contagens/{contador} {
+          function removeuLeitura(id) {
+            let ref = caminhoBipe(lista,sessao,id);
+            let bipe = get(ref).data;
+            let legado = bipe.get('contadorId','') == '' && supervisor() &&
+              bipe.codigo is string && bipe.codigo.upper() == resource.data.codigo;
+            return !existsAfter(ref) &&
+              (legado || (bipe.get('contadorId','') == contador &&
+                (supervisor() || desfazerPermitido(lista,sessao,id,bipe))));
+          }
+          function decrementoAcompanhado() {
+            let id = request.resource.data.get('ultimoBipeRemovidoId','');
+            return textoObrigatorio(id,160) && id.matches('^[^/]+$') &&
+              camposAlterados().hasOnly(['quantidade','ultimoBipeRemovidoId']) && revisaoSubiu(lista) &&
+              request.resource.data.quantidade == resource.data.quantidade - 1 && request.resource.data.quantidade >= 0 &&
+              removeuLeitura(id);
+          }
+          allow read: if membro();
+          allow create: if membro() && listaAberta(lista) && sessaoAberta(lista, sessao) &&
+            temNovoBipe(lista, sessao, contador, request.resource.data) &&
+            (get(caminhoSessao(lista, sessao)).data.get('criadaNaFase2', false) == false || request.resource.data.quantidade == 1);
+          allow update: if membro() && listaAberta(lista) && sessaoAberta(lista, sessao) &&
+            ((request.resource.data.codigo == resource.data.codigo && request.resource.data.quantidade == resource.data.quantidade + 1 &&
+              temNovoBipe(lista, sessao, contador, request.resource.data)) ||
+            decrementoAcompanhado());
+          allow delete: if admin() && (listaEmExclusao(lista) || !sessaoAberta(lista,sessao));
+        }
+      }
+    }
+
+    match /catalogosDauer/{unidade} {
+      function versaoNova(dados) {
+        let ref = /databases/$(database)/documents/catalogosDauer/$(unidade)/versoes/$(dados.versao);
+        return !exists(ref) && getAfter(ref).data.uid == request.auth.uid &&
+          getAfter(ref).data.at == request.time && getAfter(ref).data.partes == dados.partes &&
+          getAfter(ref).data.get('partesIndice',0) == dados.get('partesIndice',0);
+      }
+      allow read: if membro();
+      allow create, update: if admin() && request.resource.data.uid == request.auth.uid &&
+        request.resource.data.autor == perfilAtual().nome && request.resource.data.at == request.time &&
+        textoObrigatorio(request.resource.data.nome,80) && request.resource.data.partes is int &&
+        request.resource.data.partes > 0 && request.resource.data.total is int &&
+        request.resource.data.total > 0 && request.resource.data.get('partesIndice',0) is int &&
+        request.resource.data.get('partesIndice',0) >= 0 && versaoNova(request.resource.data);
+      match /versoes/{versao} {
+        function publicada() {
+          return exists(/databases/$(database)/documents/catalogosDauer/$(unidade)/versoes/$(versao));
+        }
+        allow read: if membro();
+        allow create: if admin() && request.resource.data.uid == request.auth.uid &&
+          request.resource.data.autor == perfilAtual().nome && request.resource.data.at == request.time &&
+          request.resource.data.versao == versao &&
+          getAfter(/databases/$(database)/documents/catalogosDauer/$(unidade)).data.versao == versao;
+        match /partes/{parte} {
+          allow read: if membro() && (publicada() || admin());
+          allow create: if admin() && !publicada() && request.resource.data.versao == versao &&
+            request.resource.data.indice is int && textoObrigatorio(request.resource.data.dados,300000);
+        }
+        match /indiceTcl/{parte} {
+          allow read: if membro() && (publicada() || admin());
+          allow create: if admin() && !publicada() && request.resource.data.versao == versao &&
+            request.resource.data.keys().hasOnly(['versao','indice','dados']) &&
+            request.resource.data.indice is int && request.resource.data.indice >= 0 &&
+            textoObrigatorio(request.resource.data.dados,300000);
+        }
+      }
+    }
+
+    match /furos/{id} {
+      function furoValido(dados) {
+        return textoObrigatorio(dados.produto,240) && textoObrigatorio(dados.codigo,160) &&
+          texto(dados.codigoInterno,160) && textoObrigatorio(dados.loja,80) &&
+          texto(dados.localizacao,180) && texto(dados.observacoes,1000) &&
+          (dados.estoqueSistema == null || dados.estoqueSistema is int) &&
+          (dados.estoqueFisico == null || (dados.estoqueFisico is int && dados.estoqueFisico >= 0)) &&
+          dados.atualizadoEm == request.time &&
+          dados.status in ['Pendente','Aguardando primeira conferência','Aguardando segunda conferência',
+            'Divergência confirmada','Resolvido','Arquivado'] &&
+          dados.keys().hasOnly(['produto','codigo','codigoInterno','loja','localizacao','observacoes','estoqueSistema',
+            'estoqueFisico','status','atualizadoEm','criadoEm','autor','uid','versao','ultimoHistorico',
+            'data1','data2','responsavel1','responsavel2']);
+      }
+      function temAlteracao(dados) {
+        let ref = /databases/$(database)/documents/furos/$(id)/alteracoes/$(dados.ultimoHistorico);
+        return !exists(ref) && getAfter(ref).data.at == request.time &&
+          getAfter(ref).data.uid == request.auth.uid && getAfter(ref).data.versao == dados.versao;
+      }
+      function conferenciasValidas(dados,anterior) {
+        return (!camposAlterados().hasAny(['data1','responsavel1']) ||
+            (anterior.get('data1',null) == null && dados.data1 == request.time && dados.responsavel1 == perfilAtual().nome)) &&
+          (!camposAlterados().hasAny(['data2','responsavel2']) ||
+            (anterior.get('data1',null) != null && anterior.get('data2',null) == null &&
+              dados.data2 == request.time && dados.responsavel2 == perfilAtual().nome));
+      }
+      allow read: if membro();
+      allow create: if membro() && furoValido(request.resource.data) &&
+        request.resource.data.uid == request.auth.uid && request.resource.data.autor == perfilAtual().nome &&
+        request.resource.data.criadoEm == request.time && request.resource.data.status == 'Pendente' &&
+        request.resource.data.versao == 1 && !request.resource.data.keys().hasAny(['data1','data2','responsavel1','responsavel2']) &&
+        temAlteracao(request.resource.data);
+      allow update: if supervisor() && furoValido(request.resource.data) &&
+        !camposAlterados().hasAny(['uid','autor','criadoEm']) &&
+        request.resource.data.versao == resource.data.versao + 1 &&
+        conferenciasValidas(request.resource.data,resource.data) && temAlteracao(request.resource.data);
+      match /alteracoes/{alteracao} {
+        allow read: if membro();
+        allow create: if membro() && request.resource.data.uid == request.auth.uid &&
+          request.resource.data.autor == perfilAtual().nome && request.resource.data.at == request.time &&
+          request.resource.data.antes is map && request.resource.data.depois is map &&
+          getAfter(/databases/$(database)/documents/furos/$(id)).data.ultimoHistorico == alteracao &&
+          getAfter(/databases/$(database)/documents/furos/$(id)).data.versao == request.resource.data.versao;
+      }
+    }
+
+    match /conferencias/_controle_listas {
+      allow read: if membro();
+      allow create, update: if supervisor() && request.resource.data.keys().hasOnly(['ids']) &&
+        request.resource.data.ids is list && request.resource.data.ids.size() <= 4;
+    }
+    match /conferencias/{lista} {
+      allow read: if membro();
+      allow create: if supervisor() && lista != '_controle_listas' && listaAberta(lista) &&
+        request.resource.data.finalizadaEm == request.time && request.resource.data.finalizadaPor == perfilAtual().nome &&
+        request.resource.data.finalizadaPorUid == request.auth.uid &&
+        getAfter(caminhoLista(lista)).data.finalizadaEm == request.time;
+      match /partes/{parte} {
+        allow read: if membro();
+        allow create, update: if supervisor() && lista != '_controle_listas' && listaAberta(lista);
+      }
+    }
+  }
+}

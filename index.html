@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blulivro</title>
+<script defer src="/vendor/firebase-app-compat.js"></script>
+<script defer src="/vendor/firebase-firestore-compat.js"></script>
+<script defer src="/vendor/firebase-auth-compat.js"></script>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#1A0A0A">
+<script src="/tema.js"></script>
+<link rel="stylesheet" href="/app.css">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="tela-login">
+  <div class="login-card">
+    <div class="login-logo">BLU<span>LIVRO</span></div>
+    <div class="login-sub">Sistema de Conferência de Estoque</div>
+    <form id="form-login" class="form-login" onsubmit="fazerLogin(event)">
+      <label for="login-email">E-mail</label>
+      <input id="login-email" type="email" autocomplete="username" required>
+      <label for="login-senha">Senha</label>
+      <input id="login-senha" type="password" autocomplete="current-password" required>
+      <label class="conta-cor"><input id="login-lembrar" type="checkbox"> Lembre-se de mim</label>
+      <p class="ajuda" id="login-erro" role="status">Conectando ao Firebase…</p>
+      <button class="btn" id="btn-login" type="submit" disabled>Entrar</button>
+      <button class="btn sec" type="button" id="btn-recuperar-senha" onclick="recuperarSenha()" disabled>Recuperar senha</button>
+    </form>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" style="display:none;flex-direction:row;height:100vh;overflow:hidden">
+<aside id="menu-app">
+  <div class="logo-wrap">
+    <div class="logo">BLU<span>LIVRO</span></div>
+    <div class="logo-sub">CONFERÊNCIA DE ESTOQUE</div>
+    <div class="user-row">
+      <div class="avatar" id="user-avatar"></div>
+      <div class="user-identidade"><strong id="user-nome"></strong><small id="user-perfil"></small></div>
+    </div>
+  </div>
+  <nav>
+    <button id="nav-ferramentas" type="button" onclick="ir('ferramentas')">Ferramentas</button>
+    <button id="nav-bipe" type="button" onclick="ir('conferencia')">Conferência</button>
+    <button id="nav-tcl" type="button" onclick="ir('tcl')">TCL</button>
+    <button id="nav-furos" type="button" onclick="ir('furos')">Furos</button>
+    <hr class="nav-sep">
+    <a id="nav-chat" onclick="ir('chat')">💬 Chat</a>
+    <a id="nav-importar" data-permissao="supervisao" onclick="ir('importar')" hidden>↑ Catálogo na conferência</a>
+    <button type="button" id="nav-divergencias" onclick="ir('divergencias')">Divergências</button>
+    <button type="button" id="nav-config" onclick="ir('config')">Configurações</button>
+    <button type="button" id="nav-sobre" onclick="ir('sobre')">Sobre e manual</button>
+  </nav>
+  <div class="online-box">
+    <div class="online-title"><span class="dot-green"></span> Online <span id="online-cnt">0</span></div>
+    <div id="online-list"></div>
+  </div>
+  <div class="sidebar-actions" data-permissao="admin" hidden>
+    <button onclick="if(confirm('Limpar a base antiga?'))limparBase()">✕ Limpar base antiga</button>
+  </div>
+</aside>
+
+<button type="button" class="sombra-menu-bipe" id="sombra-menu-bipe" aria-label="Fechar menu" onclick="fecharMenuBipe()" hidden></button>
+<main style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+  <div class="topbar">
+    <button type="button" class="btn btn-sm sec btn-menu-bipe" id="btn-menu-bipe" aria-controls="menu-app" aria-expanded="false" onclick="alternarMenuBipe()">Menu</button>
+    <span class="pg-title" id="pg-title">Visão Geral</span>
+    <div class="bipe-cronometro" id="bipe-cronometro" hidden>
+      <div>
+        <span id="cronometro-estado">Tempo ativo</span>
+        <div id="cronometro-valor" role="timer" aria-labelledby="cronometro-estado">00:00:00</div>
+      </div>
+      <button type="button" class="btn sec btn-sm" id="btn-pausa" onclick="togglePausa()">Pausar</button>
+    </div>
+    <button class="btn btn-sm sec" id="btn-instalar" hidden>Instalar aplicativo</button>
+    <button class="btn btn-sm sec" id="btn-tela-cheia" onclick="alternarTelaCheia()" hidden>Tela cheia</button>
+    <div class="toggle-row">
+      <label><input type="checkbox" id="chk-som" onchange="toggleSom()"> Som</label>
+      <label><input type="checkbox" id="chk-notif" onchange="toggleNotif()"> Notificações</label>
+    </div>
+  </div>
+  <div class="conteudo">
+
+    <div id="tela-ferramentas" class="tela">
+      <section class="hub-ferramentas" aria-label="Ferramentas do Blulivro">
+        <button type="button" onclick="ir('conferencia')"><span aria-hidden="true">⬡</span><strong>Conferência</strong><small>Abra uma lista para bipar e acompanhar a conferência.</small></button>
+        <button type="button" onclick="ir('tcl')"><span aria-hidden="true">⌕</span><strong>TCL</strong><small>Consulte produtos, preços e estoque por unidade.</small></button>
+        <button type="button" onclick="ir('furos')"><span aria-hidden="true">↔</span><strong>Furos</strong><small>Registre diferenças de estoque e acompanhe as verificações.</small></button>
+      </section>
+    </div>
+    <div id="tela-tcl" class="tela">
+      <section class="card">
+        <div class="filtros-sessoes filtros-revisao tcl-busca-linha">
+          <label>Unidade <select id="tcl-unidade" onchange="carregarTcl()"></select></label>
+          <label>Buscar ou bipar código <input type="search" id="tcl-busca" placeholder="Título, autor, ISBN ou código" autocomplete="off" oninput="programarBuscaTcl()" onkeydown="localizarBipeTcl(event)"></label>
+          <button type="button" class="btn sec" id="tcl-consultar-isbn" onclick="solicitarCodigoTcl(document.getElementById('tcl-busca').value)" disabled>Consultar ISBN</button>
+        </div>
+        <details class="tcl-filtros" id="tcl-filtros">
+          <summary>Filtros do catálogo</summary>
+          <div class="filtros-sessoes filtros-revisao tcl-filtros-campos">
+            <label>Autor <input type="search" id="tcl-autor" oninput="programarBuscaTcl()"></label>
+            <label>Editora <input type="search" id="tcl-editora" oninput="programarBuscaTcl()"></label>
+            <label>Sessão <select id="tcl-sessao" onchange="renderTcl()"><option value="">Todas as sessões</option></select></label>
+            <label>Gênero <input type="search" id="tcl-genero" oninput="programarBuscaTcl()"></label>
+            <label>Assunto <input type="search" id="tcl-assunto" oninput="programarBuscaTcl()"></label>
+          </div>
+          <div class="row-btn"><button class="btn sec btn-sm" type="button" onclick="limparFiltrosTcl()">Limpar filtros</button><button class="btn sec btn-sm" id="tcl-enriquecer" type="button" onclick="enriquecerResultadosTcl()">Completar dados por ISBN</button></div>
+          <p class="ajuda" id="tcl-dados-filtros" role="status">Gênero e assunto usam os dados já consultados. Complete os resultados por ISBN para ampliar o filtro.</p>
+        </details>
+        <p class="ajuda" id="tcl-status" role="status"></p>
+        <div class="tbl-wrap"><table><thead><tr><th>Produto</th><th>Preço de venda</th><th>Estoque</th><th>Localização</th><th>ISBN</th></tr></thead><tbody id="tcl-resultados"></tbody></table></div>
+        <div id="pag-tcl" class="paginacao" hidden></div>
+      </section>
+    </div>
+    <div id="tela-furos" class="tela">
+      <section class="card">
+        <div class="row-btn furos-acoes">
+          <button class="btn" type="button" onclick="abrirFuro()">Novo furo</button>
+          <button class="btn sec" type="button" onclick="atualizarFuros()">Atualizar registros</button>
+        </div>
+        <div class="filtros-sessoes filtros-revisao furos-filtros">
+          <label>Busca <input type="search" id="furos-busca" placeholder="Produto, código, loja ou responsável" oninput="renderFuros()"></label>
+          <label>Status <select id="furos-filtro" onchange="renderFuros()"></select></label>
+          <label>Data do registro <input id="furos-data" type="date" onchange="renderFuros()"></label>
+        </div>
+        <p class="ajuda" id="furos-status" role="status"></p>
+        <div class="tbl-wrap furos-tabela"><table role="table" aria-label="Furos registrados"><thead role="rowgroup"><tr role="row"><th role="columnheader">Produto</th><th role="columnheader">Loja</th><th role="columnheader">Status</th><th role="columnheader">Diferença</th><th role="columnheader">Registrado por</th><th role="columnheader">Ação</th></tr></thead><tbody id="furos-resultados" role="rowgroup"></tbody></table></div>
+        <div id="pag-furos" class="paginacao" hidden></div>
+      </section>
+    </div>
+    <div id="tela-fonte" class="tela">
+      <section class="card configuracoes">
+        <h2>Catálogo Dauer</h2>
+        <form onsubmit="gerarPreviaCatalogo(event)">
+          <div class="form-group"><label for="catalogo-unidade">Unidade</label><input type="text" id="catalogo-unidade" maxlength="80" required oninput="invalidarPreviaCatalogo()"></div>
+          <div class="form-group"><label for="catalogo-arquivo">Arquivo do Dauer</label><input type="file" id="catalogo-arquivo" accept=".xls,.xlsx,.xlsm,.xml" required onchange="invalidarPreviaCatalogo()"></div>
+          <p class="ajuda">Para completar produtos da unidade, importe uma planilha com ISBN e Preço de venda ou URL da capa.</p>
+          <div class="row-btn"><button class="btn sec" id="catalogo-prever" type="submit">Gerar prévia</button><button class="btn" id="catalogo-publicar" type="button" onclick="publicarCatalogo()" disabled>Publicar catálogo</button></div>
+        </form>
+        <p id="catalogo-estado" class="ajuda" role="status"></p>
+        <div id="catalogo-amostra" hidden></div>
+      </section>
+      <section class="card configuracoes"><h2>Integração SQL</h2><p>Sem conexão configurada. O TCL usa as publicações do Dauer.</p></section>
+      <section class="card"><h2>Histórico de importações</h2><div class="tbl-wrap"><table><thead><tr><th>Unidade</th><th>Arquivo</th><th>Responsável</th><th>Data</th><th>Total</th><th>Versão</th></tr></thead><tbody id="historico-catalogo"></tbody></table></div></section>
+    </div>
+
+    <section id="tela-conferencia" class="tela conferencia-home">
+      <section aria-labelledby="visao-conferencia">
+        <h2 id="visao-conferencia" class="conferencia-titulo">Visão geral</h2>
+        <div class="kpis" id="kpis"></div>
+      </section>
+      <section id="bipe-listas" class="conferencia-listas" aria-labelledby="listas-titulo">
+        <div class="conferencia-listas-topo">
+          <h2 id="listas-titulo" class="conferencia-titulo">Escolher lista</h2>
+          <button type="button" class="btn" id="conferencia-nova" data-permissao="supervisao" onclick="abrirNovaLista()" hidden>Nova lista</button>
+        </div>
+        <div id="listas-container" class="conferencia-grade"></div>
+        <p class="ajuda" id="status-listas" role="status"></p>
+      </section>
+      <details id="conferencia-detalhes" class="card conferencia-detalhes" ontoggle="acompanharDetalhesDaVisaoGeral()">
+        <summary>Status, pendências e histórico semanal</summary>
+        <button type="button" class="btn sec btn-sm" onclick="acompanharDetalhesDaVisaoGeral(true)">Atualizar detalhes</button>
+        <p class="ajuda" id="dash-detalhes-status" role="status"></p>
+        <div class="dash-grid">
+          <section><h3 class="card-title">Status da conferência</h3><div id="dash-status"></div></section>
+          <section><h3 class="card-title">Não bipados por seção</h3><div id="dash-secoes"></div><div class="paginacao" id="pag-dash" hidden></div></section>
+        </div>
+        <div class="card"><h2 class="card-title">Bipes em conferências finalizadas por semana</h2><div id="dash-semanas" class="dash-semanas"></div></div>
+      </details>
+    </section>
+
+    <section id="tela-bipe" class="tela">
+      <header id="bipe-contexto" class="bipe-contexto conferencia-contexto" hidden>
+        <div class="conferencia-identidade">
+          <h2 id="bipe-lista-nome" tabindex="-1"></h2>
+          <span id="sessao-badge" class="conferencia-sessao" role="status" hidden>
+            <span id="sb-sessao-nome"></span><small id="sb-sessao-cnt"></small>
+          </span>
+        </div>
+        <div class="row-btn conferencia-acoes-lista">
+          <button type="button" class="btn sec btn-sm" id="btn-sessoes-lista" aria-expanded="false" aria-controls="sessoes-painel" onclick="alternarPainelSessoes()">Sessões <small id="sessoes-info"></small></button>
+          <button type="button" class="btn sec btn-sm" id="bipe-trocar" onclick="ir('conferencia')">Trocar lista</button>
+        </div>
+      </header>
+      <div id="conferencia-modos" class="conferencia-modos" aria-label="Ações da lista" hidden>
+        <button type="button" class="conferencia-modo" aria-pressed="false" data-modo="bipar" onclick="abrirModoConferencia('bipar')"><strong>Bipar</strong><small>Registrar leituras nesta lista</small></button>
+        <button type="button" class="conferencia-modo" aria-pressed="false" data-modo="resumo" onclick="abrirModoConferencia('resumo')"><strong>Resumo</strong><small>Consultar contagens, divergências e relatórios</small></button>
+      </div>
+      <div id="sem-aba" class="empty" hidden>Selecione uma lista para continuar.</div>
+      <section class="card conferencia-sessoes" id="sessoes-painel" aria-label="Sessões da lista" hidden>
+        <div class="painel-bipe-corpo">
+          <div class="filtros-sessoes">
+            <input id="buscar-sessoes" aria-label="Buscar sessão" placeholder="Buscar sessão" type="search" oninput="renderSessoes()">
+            <select id="filtro-sessoes" aria-label="Filtrar sessões" onchange="renderSessoes()">
+              <option value="">Todas</option><option value="divergencia">Com divergência</option>
+              <option value="com-bipes">Com bipes</option><option value="sem-bipes">Sem bipes</option>
+            </select>
+            <button type="button" class="btn sec btn-sm" data-permissao="supervisao" onclick="ir('importar')" hidden>Usar catálogo Dauer</button>
+            <button class="btn sec btn-sm" data-permissao="admin" onclick="abrirLimpezaSessoes()" hidden>Limpar sessões vazias</button>
+            <button type="button" class="btn sec btn-sm" data-permissao="admin" onclick="administrarLista(ME.listaAtiva)" hidden>Editar lista</button>
+            <button type="button" class="btn sec btn-sm" data-permissao="admin" onclick="excluirAba(ME.listaAtiva)" hidden>Excluir lista</button>
+          </div>
+          <div class="sessoes-grid" id="sessoes-grid"></div><div class="paginacao" id="pag-sessoes" hidden></div>
+        </div>
+      </section>
+
+      <div id="com-aba" style="display:none">
+        <div class="card">
+          <div class="bipe-acoes-leitura">
+            <label class="card-title" for="inp-bipe">REGISTRAR CÓDIGO</label>
+            <button type="button" class="btn sec" id="btn-camera" aria-expanded="false" aria-controls="camera-painel" onclick="alternarCamera()">Usar câmera</button>
+          </div>
+          <div id="camera-painel" hidden>
+            <div class="camera-vista">
+              <video id="camera-video" autoplay playsinline muted aria-label="Visualização da câmera traseira"></video>
+              <div class="camera-guia" aria-hidden="true"></div>
+            </div>
+            <div class="camera-acoes">
+              <button class="btn sec btn-sm" id="camera-lanterna" type="button" aria-pressed="false" onclick="alternarLanterna()" hidden>Lanterna</button>
+              <p id="camera-orientacao" class="ajuda"></p>
+            </div>
+            <p id="camera-leitura" role="status" aria-atomic="true"></p>
+          </div>
+          <div class="bipe-registro-manual">
+            <div class="bipe-wrap">
+              <input id="inp-bipe" aria-label="Código de barras ou ISBN" type="text" placeholder="Código ou ISBN" autocomplete="off" oninput="sugerirCodigos()">
+              <div class="autocomplete-list" id="ac-list"></div>
+            </div>
+            <button class="btn" id="btn-registrar-bipe" onclick="bipar()">Registrar</button>
+            <button class="btn verde" id="btn-finalizar" data-permissao="supervisao" onclick="abrirFinalizar()" hidden>✓ Finalizar</button>
+          </div>
+          <p class="ajuda" id="status-bipe" role="status"></p>
+          <p id="continuidade-lista" class="ajuda"></p>
+          <p id="fila-bipes-status" class="ajuda" role="status"></p>
+          <button id="fila-bipes-retry" class="btn sec btn-sm" type="button" onclick="sincronizarBipesPendentes()" hidden>Sincronizar pendências</button>
+          <p class="ajuda camera-erro" id="camera-erro" role="status" hidden></p>
+          <div id="msg-bipe" role="status" aria-atomic="true"></div>
+          <button type="button" class="btn sec btn-sm" id="desfazer-bipe" onclick="desfazerUltimoBipe()" hidden>Desfazer último bipe</button>
+          <p class="ajuda" id="presenca-sessao" role="status" hidden></p>
+        </div>
+      </div>
+      <section id="bipe-metricas" class="bipe-metricas" aria-label="Progresso e tempo da lista" hidden>
+        <details id="progresso-detalhado" class="card" ontoggle="if(this.open)atualizarMetricas()">
+          <summary>Ver progresso por produto e tempo estimado</summary>
+          <button type="button" class="btn sec btn-sm" onclick="atualizarDetalhesDaTela()">Atualizar progresso</button>
+          <p class="ajuda" id="progresso-detalhes-status" role="status"></p>
+      <div class="card prog-geral-wrap">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <span class="card-title" style="margin:0">PROGRESSO DA LISTA</span>
+          <span id="prog-pct" style="font-size:13px;font-weight:700;color:var(--accent)">0%</span>
+        </div>
+        <div class="prog-geral-bar"><div class="prog-geral-fill" id="prog-fill" style="width:0%"></div></div>
+        <div class="prog-geral-info">
+          <span id="prog-ok">0 conferidos</span>
+          <span id="prog-total">0 total</span>
+        </div>
+      </div>
+
+      <div class="tempo-estimado" id="tempo-estimado">
+        <div class="tempo-info">
+          <div class="tempo-val" id="tempo-val">—</div>
+          <div class="tempo-lab">tempo estimado para concluir</div>
+        </div>
+        <details class="ritmo-bipe"><summary>Ver ritmo</summary><div class="tempo-taxas">
+          <div>
+            <div class="tempo-val" id="vel-atual" style="font-size:16px">—</div>
+            <div class="tempo-lab">bipes/hora agora</div>
+          </div>
+          <div>
+            <div class="tempo-val" id="vel-media" style="font-size:16px">—</div>
+            <div class="tempo-lab">bipes/hora média</div>
+          </div>
+          <div>
+            <div class="tempo-val" id="dur-sessao" style="font-size:16px">—</div>
+            <div class="tempo-lab">tempo ativo deste operador</div>
+          </div>
+          <div><div class="tempo-val" id="vel-ativo">—</div><div class="tempo-lab">bipes/min ativo deste operador</div></div>
+        </div></details>
+      </div>
+
+        </details>
+      </section>
+      <details id="hist-bipe" class="painel-bipe" ontoggle="if(this.open)renderHistorico(ME.listaAtiva)" hidden>
+        <summary>Histórico de bipagem</summary>
+        <div class="painel-bipe-corpo">
+          <div class="row-btn" style="margin-bottom:10px">
+            <button class="btn btn-sm sec" id="btn-todos-bipes" onclick="selecionarSessao(null)" hidden>Toda a lista</button>
+            <button type="button" class="btn btn-sm sec" onclick="atualizarHistoricoBipes()">Atualizar histórico</button>
+            <span id="cnt-bipe" style="font-size:12px;color:var(--muted)"></span>
+          </div>
+          <div class="tbl-wrap">
+            <table><thead><tr><th>#</th><th>CÓDIGO</th><th>TÍTULO</th><th>SESSÃO</th><th>OPERADOR</th><th>HORA</th><th>STATUS</th><th>DETALHE</th><th></th></tr></thead>
+            <tbody id="tb-bipe"></tbody></table>
+          </div>
+          <button class="btn sec btn-sm" id="btn-mais-bipes" hidden onclick="mostrarMaisBipes()">Mostrar mais bipes</button>
+        </div>
+      </details>
+    <section id="tela-resumo" class="card conferencia-resumo" aria-label="Resumo da lista" hidden>
+      <button type="button" class="btn sec btn-sm" onclick="atualizarDetalhesDaTela()">Atualizar resumo</button>
+      <p class="ajuda" id="resumo-detalhes-status" role="status"></p>
+      <details class="triagem-isbns" id="triagem-isbns" data-permissao="supervisao" ontoggle="if(this.open)renderResumo()" hidden>
+        <summary>Tratar ISBNs não encontrados</summary>
+        <p class="ajuda">Selecione os códigos. Um vínculo identifica o produto para revisão e mantém a leitura original no histórico.</p>
+        <div class="search-row"><input type="search" id="busca-triagem" placeholder="Localizar código" aria-label="Localizar código" oninput="renderTriagemIsbns(resumoAtual(ME.listaAtiva).rows)"><span id="triagem-total" class="ajuda" role="status"></span></div>
+        <div id="triagem-itens" class="triagem-itens"></div>
+        <div class="row-btn"><button type="button" class="btn sec btn-sm" onclick="salvarTriagemIsbns()">Marcar para revisão</button><button type="button" class="btn sec btn-sm" onclick="abrirVinculoIsbns()">Vincular a produto</button></div>
+      </details>
+      <div class="search-row">
+        <input id="f-titulo" type="search" aria-label="Buscar no resumo" placeholder="Título ou ISBN" oninput="renderResumo()">
+        <select id="f-status" aria-label="Filtrar por status" onchange="renderResumo()">
+          <option value="">Todos os status</option>
+          <option>OK</option><option>FALTANDO</option><option>EXCEDIDO</option><option>NÃO ENCONTRADO</option><option>PENDENTE</option><option>ALERTA</option>
+        </select>
+        <select id="f-secao" aria-label="Filtrar por sessão" onchange="renderResumo()"><option value="">Todas as sessões</option></select>
+        <button class="btn btn-sm" onclick="exportarXLSX(false,this)">↓ Excel</button>
+        <button class="btn btn-sm sec" onclick="exportarPDF(false,this)">↓ PDF</button>
+      </div>
+      <div class="tbl-wrap">
+        <table role="table" aria-label="Contagem por produto"><thead role="rowgroup"><tr role="row"><th role="columnheader">Código</th><th role="columnheader">Título</th><th role="columnheader">Sessão</th><th role="columnheader" style="text-align:center">Esperado</th><th role="columnheader" style="text-align:center">Bipado</th><th role="columnheader" style="text-align:center">Diferença</th><th role="columnheader">Status</th></tr></thead>
+        <tbody id="tb-resumo" role="rowgroup"></tbody></table>
+      </div>
+      <div class="paginacao" id="pag-resumo" hidden></div>
+    </section>
+    </section>
+
+
+
+    <!-- BASE -->
+    <div id="tela-base" class="tela">
+      <button class="btn sec voltar-config" type="button" onclick="ir('config')">Voltar para Configurações</button>
+      <div class="search-row">
+        <input id="f-base" placeholder="Pesquisar..." oninput="renderBase()" style="flex:1;min-width:180px">
+        <select id="f-secao-base" onchange="renderBase()"><option value="">Todas as seções</option></select>
+        <span id="cnt-base" style="font-size:12px;color:var(--muted);align-self:center"></span>
+      </div>
+      <div class="tbl-wrap">
+        <table><thead><tr><th>CÓDIGO</th><th>TÍTULO</th><th style="text-align:center">QTD</th><th>SEÇÃO</th></tr></thead>
+        <tbody id="tb-base"></tbody></table>
+      </div>
+      <div class="paginacao" id="pag-base" hidden></div>
+    </div>
+
+    <!-- CHAT -->
+    <div id="tela-chat" class="tela">
+      <div class="chat-layout">
+        <div class="chat-sidebar">
+          <div class="chat-sidebar-title">CANAIS</div>
+          <div id="chat-tabs"></div>
+        </div>
+        <div class="chat-main">
+          <div class="chat-topbar">
+            <span id="chat-titulo" style="font-weight:600;font-size:14px">Chat Geral</span>
+            <button class="btn sec btn-sm" data-permissao="admin" onclick="limparChat()" hidden>🗑 Limpar</button>
+          </div>
+          <div class="chat-msgs" id="chat-msgs"></div>
+          <div class="chat-input-row">
+            <input id="chat-inp" type="text" placeholder="Mensagem... (Enter para enviar)">
+            <button class="btn" onclick="enviarChat()">Enviar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- IMPORTAR -->
+    <div id="tela-importar" class="tela">
+      <div class="card">
+        <h2 class="conferencia-titulo">Usar catálogo Dauer na lista</h2>
+        <form class="filtros-sessoes filtros-revisao" onsubmit="carregarPreviaDaBase(event)">
+          <label>Unidade do catálogo <select id="catalogo-lista-unidade" onchange="atualizarBotaoPreviaDaBase()" disabled></select></label>
+          <button class="btn" type="submit" id="catalogo-lista-prever" disabled>Gerar prévia da lista</button>
+        </form>
+        <p class="ajuda" id="catalogo-lista-status" role="status"></p>
+        <button type="button" class="btn sec btn-sm" data-permissao="admin" onclick="ir('fonte')" hidden>Publicar catálogo da unidade</button>
+        <details class="importacao-avulsa">
+          <summary>Importação avulsa ou rascunho anterior</summary>
+        <div class="card-title">SELECIONAR ARQUIVOS DAUER</div>
+        <div class="drop-area" id="drop-area" onclick="document.getElementById('inp-arq').click()">
+          <div style="font-size:32px;margin-bottom:8px">📂</div>
+          <div style="font-weight:600;margin-bottom:4px">Clique ou arraste os arquivos aqui</div>
+          <div style="font-size:12px">.xls · .xlsx · .xlsm · .xml — as sessões vêm das localizações do relatório Dauer</div>
+        </div>
+        <input type="file" id="inp-arq" multiple accept=".xls,.xlsx,.xlsm,.xml" style="display:none" onchange="importar(this.files);this.value=''">
+        </details>
+        <section id="andamento-import" class="andamento-import" aria-label="Progresso da importação" hidden>
+          <div role="status" aria-atomic="true">
+            <strong id="etapa-import"></strong>
+            <p id="detalhes-import" class="ajuda"></p>
+          </div>
+          <button type="button" class="btn sec btn-sm" id="pausar-import" onclick="solicitarPausaImportacao()" hidden>Pausar após este lote</button>
+          <progress id="progresso-import" aria-label="Andamento da etapa"></progress>
+        </section>
+        <div id="log-import"></div>
+        <div id="area-btn-import" style="margin-top:12px;display:none">
+          <div style="margin-bottom:10px;">
+            <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px;font-weight:600">ADICIONAR À LISTA:</label>
+            <select id="sel-lista-import" onchange="atualizarDestinoImportacao()" style="padding:7px 11px;background:var(--bg3);border:1px solid var(--borda);border-radius:7px;font-size:13px;color:var(--texto);outline:none;min-width:200px;">
+              <option value="">Selecione uma lista...</option>
+            </select>
+          </div>
+          <section id="previa-importacao" aria-label="Prévia da importação">
+            <p id="status-rascunho" class="ajuda" role="status"></p>
+            <p id="previa-totais" role="status"></p>
+            <div class="filtros-sessoes previa-acoes">
+              <input id="buscar-previa" aria-label="Buscar sessão na prévia" placeholder="Buscar sessão" type="search" oninput="renderPreviaImportacao()">
+              <button type="button" class="btn sec btn-sm" onclick="marcarTodasImportacao(true)">Marcar todas</button>
+              <button type="button" class="btn sec btn-sm" onclick="marcarTodasImportacao(false)">Desmarcar todas</button>
+            </div>
+            <div class="tbl-wrap previa-tabela">
+              <table><thead><tr><th>Incluir</th><th>Sessão</th><th>Produtos</th><th>Exemplares</th><th>Ação</th><th>Divergência</th></tr></thead>
+                <tbody id="previa-sessoes"></tbody>
+              </table>
+            </div>
+            <div class="paginacao" id="pag-previa" hidden></div>
+          </section>
+          <div class="row-btn previa-botoes">
+            <button class="btn" id="btn-import" onclick="confirmarImport()" disabled>Confirmar importação</button>
+            <button class="btn sec btn-sm" id="btn-descartar-import" onclick="descartarRascunhoImportacao()">Descartar rascunho</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tela-config" class="tela">
+      <section class="card configuracoes" aria-labelledby="config-tema">
+        <fieldset>
+          <legend id="config-tema">Tema de cor</legend>
+          <div class="opcoes-tema">
+            <label><input type="radio" name="tema" value="vermelho" onchange="aplicarTema(this.value,true)"><span class="amostra-tema vermelho" aria-hidden="true"></span>Vermelho</label>
+            <label><input type="radio" name="tema" value="branco" onchange="aplicarTema(this.value,true)"><span class="amostra-tema branco" aria-hidden="true"></span>Branco</label>
+            <label><input type="radio" name="tema" value="preto" onchange="aplicarTema(this.value,true)"><span class="amostra-tema preto" aria-hidden="true"></span>Preto</label>
+          </div>
+        </fieldset>
+      </section>
+      <section class="card configuracoes" aria-labelledby="config-registros">
+        <h2 id="config-registros">Registros</h2>
+        <div class="row-btn">
+          <button class="btn sec" type="button" id="nav-conferencias" onclick="ir('conferencias')">Histórico de conferências</button>
+          <button class="btn sec" type="button" id="nav-log" data-permissao="supervisao" onclick="ir('log')" hidden>Log de auditoria</button>
+        </div>
+      </section>
+      <section class="card configuracoes"><h2>Catálogo</h2><div class="row-btn"><button class="btn sec" type="button" id="nav-fonte" data-permissao="admin" onclick="ir('fonte')" hidden>Fonte de dados</button><button class="btn sec" type="button" id="nav-base" onclick="ir('base')">Produtos das listas</button></div></section>
+      <section class="card configuracoes" data-permissao="admin" hidden>
+        <h2>Listas arquivadas</h2><div id="listas-arquivadas"></div>
+      </section>
+      <section class="card configuracoes" data-permissao="admin" hidden>
+        <h2>Sessões de login</h2>
+        <form onsubmit="salvarPoliticaDeSessao(event)">
+          <div class="form-group"><label for="sessao-dias">Prazo máximo desde o login, em dias</label><input id="sessao-dias" type="number" min="1" max="30" step="1" value="7" required></div>
+          <button class="btn sec" type="submit">Salvar prazo</button>
+        </form>
+      </section>
+      <section class="card configuracoes" aria-labelledby="config-conta">
+        <h2 id="config-conta">Minha conta</h2>
+        <p id="conta-identidade" class="ajuda"></p>
+        <label class="conta-cor" for="conta-cor">Cor do avatar <input id="conta-cor" type="color" onchange="alterarCorDeAvatar(this.value)"></label>
+        <div class="row-btn">
+          <button class="btn sec" type="button" id="nav-usuarios" data-permissao="admin" onclick="ir('usuarios')" hidden>Gerenciar acessos</button>
+          <button class="btn sec" type="button" onclick="sairDaConta()">Sair</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="tela-usuarios" class="tela">
+      <button class="btn sec voltar-config" type="button" onclick="ir('config')">Voltar para Configurações</button>
+      <section class="card configuracoes" aria-labelledby="usuarios-titulo">
+        <h2 id="usuarios-titulo">Vincular conta a um perfil</h2>
+        <p class="ajuda">Use o UID e o e-mail da conta criada no Firebase Authentication.</p>
+        <form id="form-usuario" onsubmit="salvarPerfilUsuario(event)">
+          <div class="form-group"><label for="usuario-uid">UID da conta</label><input id="usuario-uid" type="text" required maxlength="128"></div>
+          <div class="form-group"><label for="usuario-nome">Nome</label><input id="usuario-nome" type="text" required maxlength="60"></div>
+          <div class="form-group"><label for="usuario-email">E-mail</label><input id="usuario-email" type="email" required maxlength="160"></div>
+          <div class="form-group"><label for="usuario-perfil">Perfil</label><select id="usuario-perfil">
+            <option value="operador">Operador</option><option value="supervisor">Supervisor</option><option value="administrador">Administrador</option>
+          </select></div>
+          <label><input type="checkbox" id="usuario-ativo" checked> Acesso ativo</label>
+          <p id="usuario-status" class="ajuda" role="status"></p>
+          <div class="row-btn"><button type="submit" class="btn" id="btn-salvar-usuario">Salvar perfil</button>
+            <button type="button" class="btn sec" onclick="limparFormularioUsuario()">Limpar formulário</button></div>
+        </form>
+      </section>
+      <div class="tbl-wrap">
+        <table><thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Acesso</th><th>Ação</th></tr></thead><tbody id="tb-usuarios"></tbody></table>
+      </div>
+    </div>
+
+    <div id="tela-divergencias" class="tela">
+      <section class="card" aria-label="Revisão de divergências">
+        <div class="filtros-sessoes filtros-revisao">
+          <label>Lista <select id="revisao-lista" onchange="renderDivergencias()"></select></label>
+          <label>Revisão <select id="revisao-filtro" onchange="renderDivergencias()">
+            <option value="abertas">Em aberto</option><option value="pendente">Pendentes</option>
+            <option value="recontagem">Em recontagem</option><option value="resolvida">Resolvidas</option><option value="">Todas</option>
+          </select></label>
+          <label>Livro ou sessão <input type="search" id="revisao-busca" oninput="renderDivergencias()" placeholder="Título, ISBN ou sessão"></label>
+        </div>
+        <button type="button" class="btn sec btn-sm" onclick="atualizarDetalhesDaTela()">Atualizar divergências</button>
+        <p class="ajuda" id="revisao-contagem" role="status"></p>
+        <div class="tbl-wrap tabela-revisao">
+          <table><thead><tr><th>Livro</th><th>Sessão</th><th>Esperado</th><th>Bipado</th><th>Divergência</th><th>Revisão</th><th>Ação</th></tr></thead>
+          <tbody id="tb-divergencias"></tbody></table>
+        </div>
+        <div class="paginacao" id="pag-divergencias" hidden></div>
+      </section>
+    </div>
+
+    <div id="tela-conferencias" class="tela">
+      <button class="btn sec voltar-config" type="button" onclick="ir('config')">Voltar para Configurações</button>
+      <div class="tbl-wrap">
+        <table><thead><tr><th>CONFERÊNCIA</th><th>FINALIZADA EM</th><th>OPERADOR</th><th>SESSÕES BIPADAS</th><th>BIPES</th><th>EXPORTAR</th></tr></thead>
+        <tbody id="tb-conferencias"></tbody></table>
+      </div>
+    </div>
+
+    <!-- LOG -->
+    <div id="tela-log" class="tela">
+      <button class="btn sec voltar-config" type="button" onclick="ir('config')">Voltar para Configurações</button>
+      <div class="row-btn" style="margin-bottom:12px">
+        <div style="flex:1;font-size:13px;color:var(--muted)">Registro de todas as ações</div>
+        <button class="btn sec btn-sm" data-permissao="admin" onclick="limparLog()" hidden>🗑 Limpar log</button>
+      </div>
+      <div class="tbl-wrap">
+        <table><thead><tr><th>HORA</th><th>OPERADOR</th><th>AÇÃO</th></tr></thead>
+        <tbody id="tb-log"></tbody></table>
+      </div>
+    </div>
+
+    <div id="tela-sobre" class="tela">
+      <article class="manual" aria-labelledby="manual-titulo">
+        <header class="card manual-intro">
+          <h1 id="manual-titulo" tabindex="-1">Conferência de estoque</h1>
+          <p>O Blulivro compara o estoque registrado no Dauer com os exemplares encontrados na loja. A equipe registra cada livro pelo ISBN e identifica o que foi conferido, o que falta e quais quantidades precisam de revisão.</p>
+        </header>
+
+        <div class="manual-secoes">
+          <section class="card" aria-labelledby="manual-como-usar">
+            <h2 id="manual-como-usar">Como usar</h2>
+            <ol>
+              <li>
+                <h3>Crie ou escolha uma lista</h3>
+                <p>Entre com seu e-mail e senha. Abra <strong>Conferência</strong> para consultar a visão geral e escolher a lista. Supervisores e administradores podem usar <strong>Nova lista</strong> para iniciar uma conferência.</p>
+              </li>
+              <li>
+                <h3>Importe o relatório do Dauer</h3>
+                <p>O administrador publica o arquivo por unidade em <strong>Configurações → Fonte de dados</strong>. Na lista, abra <strong>Sessões → Usar catálogo Dauer</strong>, escolha a unidade e confira a prévia antes de confirmar a importação. TCL e Furos consultam o mesmo catálogo.</p>
+              </li>
+              <li>
+                <h3>Registre os exemplares</h3>
+                <p>Escolha <strong>Bipar</strong>. Use o leitor, digite o ISBN ou toque em <strong>Usar câmera</strong> no celular. O cronômetro começa na primeira bipagem confirmada. <strong>Pausar</strong> e <strong>Retomar</strong> controlam a bipagem e a contagem do tempo.</p>
+              </li>
+              <li>
+                <h3>Revise e finalize</h3>
+                <p>Abra <strong>Resumo</strong> na lista para ver as contagens e baixar o Excel ou PDF. Em <strong>Divergências</strong>, acompanhe pendências. Supervisores e administradores registram decisões e finalizam a lista em <strong>Bipar</strong>. Consulte resultados finalizados em <strong>Configurações → Histórico de conferências</strong>.</p>
+              </li>
+            </ol>
+          </section>
+
+          <section class="card manual-orientacoes" aria-labelledby="manual-orientacoes">
+            <h2 id="manual-orientacoes">Orientações para a equipe</h2>
+            <ul>
+              <li>Confira o nome da lista antes de importar e antes de começar a bipar.</li>
+              <li>Abra <strong>Ver progresso por produto e tempo estimado</strong> para ver os detalhes. Use <strong>Atualizar progresso</strong> para consultar os últimos registros.</li>
+              <li>Ao usar a câmera, permita o acesso, centralize o código e espere aparecer <strong>Bipe confirmado</strong> antes de passar para o próximo livro.</li>
+              <li>Para bipar outro exemplar com o mesmo ISBN, afaste o código da faixa e aguarde <strong>Pronto para o próximo exemplar</strong>.</li>
+            </ul>
+          </section>
+        </div>
+      </article>
+    </div>
+
+  </div>
+</main>
+</div>
+
+<dialog id="modal-editar-lista" class="modal modal-ferramenta" aria-labelledby="editar-lista-titulo">
+  <form onsubmit="renomearLista(event)">
+    <div class="modal-header"><h3 id="editar-lista-titulo">Editar lista</h3><button type="button" class="btn-x" aria-label="Fechar" onclick="this.closest('dialog').close()">×</button></div>
+    <div class="modal-body"><div class="form-group"><label for="editar-lista-nome">Nome</label><input id="editar-lista-nome" type="text" required maxlength="80"></div>
+      <details><summary>Editar produtos do catálogo da lista</summary>
+        <div class="campos-furo">
+          <div class="form-group"><label for="editar-lista-sec">Seção existente ou nova</label><input id="editar-lista-sec" type="text" maxlength="80"></div>
+          <div class="form-group"><label for="editar-lista-codigo">ISBN ou código</label><input id="editar-lista-codigo" type="text" maxlength="160"></div>
+          <div class="form-group"><label for="editar-lista-produto">Título</label><input id="editar-lista-produto" type="text" maxlength="240"></div>
+          <div class="form-group"><label for="editar-lista-qtd">Quantidade esperada</label><input id="editar-lista-qtd" type="number" min="0" step="1"></div>
+        </div>
+        <div class="row-btn"><button type="button" class="btn sec" onclick="alterarProdutoDaLista(false)">Salvar produto</button><button type="button" class="btn sec" onclick="alterarProdutoDaLista(true)">Remover produto</button></div>
+      </details>
+      <p class="ajuda" id="editar-lista-status" role="status"></p></div>
+    <div class="modal-footer"><button type="button" class="btn sec" onclick="arquivarLista()">Arquivar lista</button><button type="submit" class="btn">Salvar nome</button></div>
+  </form>
+</dialog>
+<dialog id="tcl-modal" class="modal modal-ferramenta tcl-dialogo" aria-labelledby="tcl-titulo-ficha">
+  <header class="tcl-modal-barra">
+    <span>Ficha do livro</span>
+    <button type="button" class="btn-x" aria-label="Fechar ficha" autofocus onclick="this.closest('dialog').close()">×</button>
+  </header>
+  <div class="tcl-modal-corpo">
+    <div class="tcl-livro">
+      <div class="tcl-capa"><span id="tcl-capa-vazia">Capa indisponível</span><img id="tcl-capa" alt="" referrerpolicy="no-referrer" hidden></div>
+      <div class="tcl-identidade">
+        <p class="tcl-isbn" id="tcl-isbn-ficha" hidden></p>
+        <h2 id="tcl-titulo-ficha"></h2>
+        <p class="tcl-autor" id="tcl-autor-ficha" hidden></p>
+        <p class="tcl-edicao" id="tcl-edicao-ficha" hidden></p>
+      </div>
+    </div>
+    <section class="tcl-unidade-ficha" aria-labelledby="tcl-unidade-ficha-titulo">
+      <h3 id="tcl-unidade-ficha-titulo">Dados da unidade</h3>
+      <p id="tcl-disponibilidade-ficha" hidden></p>
+      <dl id="tcl-dados-unidade" class="tcl-operacao"></dl>
+      <button type="button" class="btn sec btn-sm" id="tcl-outras" onclick="verOutrasUnidadesTcl()" hidden>Ver outras unidades</button>
+      <div id="tcl-outras-resultado" class="tcl-outras-resultado" role="status" hidden></div>
+    </section>
+    <section class="tcl-edicao-ficha" id="tcl-edicao-detalhes" aria-label="Detalhes bibliográficos" hidden>
+      <dl class="tcl-detalhes" id="tcl-ficha"></dl>
+      <details class="tcl-sinopse" id="tcl-sinopse" hidden><summary>Sinopse</summary><p id="tcl-sinopse-texto"></p></details>
+    </section>
+    <footer class="tcl-fonte-ficha" id="tcl-fonte-ficha" hidden>
+      <span role="status" id="tcl-status-ficha"></span>
+      <a id="tcl-link-fonte" target="_blank" rel="noopener noreferrer" hidden></a>
+    </footer>
+  </div>
+</dialog>
+<dialog id="modal-vinculo-isbn" class="modal modal-ferramenta" aria-labelledby="titulo-vinculo-isbn">
+  <form onsubmit="confirmarVinculoIsbns(event)">
+    <div class="modal-header"><h3 id="titulo-vinculo-isbn">Vincular a produto da lista</h3><button type="button" class="btn-x" aria-label="Fechar" onclick="this.closest('dialog').close()">×</button></div>
+    <div class="modal-body"><div class="form-group"><label for="vinculo-codigo">ISBN ou código do produto</label><input id="vinculo-codigo" required type="search" oninput="buscarAlvosTriagem()"></div><label for="vinculo-alvo">Produto e sessão</label> <select id="vinculo-alvo" required></select><p class="ajuda" id="vinculo-isbn-estado" role="status"></p></div>
+    <div class="modal-footer"><button class="btn" type="submit">Salvar vínculo</button></div>
+  </form>
+</dialog>
+<dialog id="furo-modal" class="modal modal-ferramenta" aria-labelledby="furo-titulo">
+  <form onsubmit="salvarFuro(event)">
+    <div class="modal-header"><h3 id="furo-titulo">Registro de furo</h3><button type="button" class="btn-x" aria-label="Fechar" onclick="this.closest('dialog').close()">×</button></div>
+    <div class="modal-body">
+      <div class="campos-furo"><div class="form-group"><label for="furo-codigo">ISBN ou código</label><input type="text" id="furo-codigo" maxlength="160" required onkeydown="buscarBipeNoFuro(event)" oninput="programarConsultaFuro()"><button type="button" class="btn sec btn-sm" id="furo-consultar" onclick="consultarCatalogoNoFuro()">Buscar no catálogo</button></div><div class="form-group"><label for="furo-produto">Produto</label><input type="text" id="furo-produto" maxlength="240" required></div><div class="form-group"><label for="furo-loja">Loja</label><input type="text" id="furo-loja" maxlength="80" list="furo-unidades" required onchange="alterarLojaNoFuro()"><datalist id="furo-unidades"></datalist></div><div class="form-group"><label for="furo-codigoInterno">Código interno</label><input type="text" id="furo-codigoInterno" maxlength="160"></div><div class="form-group"><label for="furo-localizacao">Localização</label><input type="text" id="furo-localizacao" maxlength="180"></div><div class="form-group"><label for="furo-estoqueSistema">Estoque no sistema</label><input type="number" id="furo-estoqueSistema" step="1"></div><div class="form-group"><label for="furo-estoqueFisico">Estoque físico</label><input type="number" id="furo-estoqueFisico" step="1" min="0"></div><div class="form-group"><label for="furo-observacoes">Observações</label><input type="text" id="furo-observacoes" maxlength="1000"></div></div>
+      <div id="furo-supervisao" class="campos-furo" hidden>
+        <div class="form-group"><label for="furo-status">Status</label><select id="furo-status"></select></div>
+        <div class="form-group"><label for="furo-etapa">Registrar conferência</label><select id="furo-etapa"><option value="0">Nenhuma</option><option value="1">Primeira</option><option value="2">Segunda</option></select></div>
+      </div>
+      <p class="ajuda" id="furo-informacao" role="status"></p>
+      <p class="ajuda" id="furo-conferencias"></p>
+      <ul class="historico-furo" id="furo-historico"></ul>
+    </div>
+    <div class="modal-footer"><button type="button" class="btn sec" onclick="this.closest('dialog').close()">Fechar</button><button type="submit" id="furo-salvar" class="btn">Salvar</button></div>
+  </form>
+</dialog>
+<dialog id="modal-revisao" class="modal" aria-labelledby="revisao-titulo">
+  <form onsubmit="salvarRevisaoDivergencia(event)">
+    <div class="modal-header"><h3 id="revisao-titulo">Revisar divergência</h3><button class="btn-x" type="button" aria-label="Fechar" onclick="this.closest('dialog').close()">×</button></div>
+    <div class="modal-body">
+      <p id="revisao-item"></p>
+      <div class="form-group">
+        <label for="revisao-estado-edicao">Situação</label>
+        <select id="revisao-estado-edicao" onchange="atualizarCampoNotaRevisao()">
+          <option value="recontagem">Em recontagem</option><option value="resolvida">Resolvida</option><option value="pendente">Pendente</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="revisao-nota" id="revisao-nota-label">Observação</label>
+        <textarea id="revisao-nota" maxlength="300" rows="3"></textarea>
+      </div>
+      <p class="ajuda" id="revisao-erro" role="alert"></p>
+    </div>
+    <div class="modal-footer"><button class="btn sec" type="button" onclick="this.closest('dialog').close()">Cancelar</button>
+      <button id="revisao-salvar" class="btn" type="submit">Salvar revisão</button></div>
+  </form>
+</dialog>
+
+<!-- MODAL DETALHES BIPE -->
+<div class="modal-bg" id="modal-detalhe" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Detalhes do Bipe</h3>
+      <button class="btn-x" onclick="fecharModal('modal-detalhe')">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="modal-detalhe-info" style="margin-bottom:14px;padding:10px;background:var(--bg3);border-radius:8px;font-size:13px;"></div>
+      <div class="form-group" data-permissao="supervisao" hidden>
+        <label>STATUS MANUAL</label>
+        <div class="status-pills">
+          <div class="status-pill" onclick="selecionarStatusPill(this,'Verificado')" data-val="Verificado">✓ Verificado</div>
+          <div class="status-pill" onclick="selecionarStatusPill(this,'Aguardando')" data-val="Aguardando">⏳ Aguardando</div>
+          <div class="status-pill" onclick="selecionarStatusPill(this,'Recontagem')" data-val="Recontagem">↺ Recontagem</div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>COMENTÁRIO</label>
+        <textarea id="modal-comentario" rows="3" placeholder="Ex: caixa danificada, produto trocado..."></textarea>
+      </div>
+      <div class="form-group">
+        <label>FOTO DO PROBLEMA</label>
+        <div class="foto-wrap" onclick="document.getElementById('inp-foto').click()">
+          <div data-permissao="supervisao" hidden>📷 Clique para tirar foto ou selecionar imagem</div>
+          <input type="file" id="inp-foto" accept="image/*" capture="environment" style="display:none" onchange="previewFoto(this)">
+          <img id="foto-preview" class="foto-preview">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn sec" onclick="fecharModal('modal-detalhe')">Cancelar</button>
+      <button id="btn-pedir-recontagem" class="btn" onclick="salvarDetalhe(true)" hidden>Solicitar recontagem</button>
+      <button class="btn" data-permissao="supervisao" onclick="salvarDetalhe()" hidden>Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL FINALIZAR -->
+<div class="modal-bg" id="modal-finalizar" style="display:none">
+  <div class="modal" style="width:640px">
+    <div class="modal-header">
+      <h3>✓ Finalizar Conferência</h3>
+      <button class="btn-x" onclick="fecharModal('modal-finalizar')">×</button>
+    </div>
+    <div class="modal-body">
+      <strong id="fin-nome"></strong>
+      <div class="fin-grid" id="fin-grid"></div>
+      <div class="row-btn fin-revisao">
+        <p id="fin-revisao" class="ajuda" role="status"></p>
+        <button id="fin-ver-revisao" type="button" class="btn sec btn-sm" onclick="verRevisaoDoFechamento()">Ver divergências</button>
+      </div>
+      <div style="margin-bottom:14px">
+        <div class="card-title">RANKING DE OPERADORES</div>
+        <div id="fin-ranking"></div>
+      </div>
+      <div>
+        <div class="card-title">ITENS COM DIVERGÊNCIA <span id="fin-mais"></span></div>
+        <div class="tbl-wrap">
+          <table><thead><tr><th>CÓDIGO</th><th>TÍTULO</th><th>STATUS</th><th>DIF.</th></tr></thead>
+          <tbody id="fin-problemas"></tbody></table>
+        </div>
+      </div>
+    </div>
+    <div class="modal-body" id="fin-limpeza" hidden>
+      <div class="row-btn"><strong>Sessões sem bipes</strong>
+        <button class="btn sec btn-sm" onclick="selecionarTodasLimpeza('fin-limpeza-lista')">Marcar todas</button>
+      </div>
+      <p class="ajuda">Marque as sessões que deseja excluir ao finalizar.</p>
+      <div id="fin-limpeza-lista" class="lista-limpeza"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn sec" onclick="fecharModal('modal-finalizar')">Fechar</button>
+      <button class="btn sec" onclick="exportarPDF(true,this)">↓ PDF</button>
+      <button class="btn sec" onclick="exportarXLSX(true,this)">↓ Excel</button>
+      <button class="btn verde" id="btn-salvar-conferencia" onclick="salvarConferencia()">Finalizar e salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL LIMPEZA DE SESSÕES -->
+<div class="modal-bg" id="modal-limpeza" style="display:none">
+  <div class="modal" style="width:600px">
+    <div class="modal-header">
+      <h3>🧹 Limpar Sessões Sem Bipes</h3>
+      <button class="btn-x" onclick="fecharModal('modal-limpeza')">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:13px;color:var(--muted);margin-bottom:16px;">As sessões abaixo não possuem nenhum bipe registrado. Selecione as que deseja excluir.</div>
+      <div id="limpeza-lista" class="lista-limpeza"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn sec" onclick="fecharModal('modal-limpeza')">Cancelar</button>
+      <button class="btn sec" onclick="selecionarTodasLimpeza()">Selecionar todas</button>
+      <button class="btn" id="btn-executar-limpeza" onclick="executarLimpeza()" style="background:#7B1111">🗑 Excluir selecionadas</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" role="status"></div>
+
+
+<div class="modal-bg" id="modal-nova-lista" style="display:none">
+  <form class="modal" onsubmit="criarAba(event)">
+    <div class="modal-header"><h3>Nova lista de bipagem</h3><button type="button" class="btn-x" aria-label="Fechar" onclick="fecharModal('modal-nova-lista')">×</button></div>
+    <div class="modal-body form-group">
+      <label for="nova-lista-nome">Nome da lista</label>
+      <input type="text" id="nova-lista-nome" required maxlength="80">
+      <p id="nova-lista-erro" class="ajuda" role="alert"></p>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn sec" onclick="fecharModal('modal-nova-lista')">Cancelar</button>
+      <button class="btn" id="btn-criar-lista" type="submit">Criar lista</button>
+    </div>
+  </form>
+</div>
+<script defer src="/recursos.js"></script>
+<script defer src="/leitor-dauer.js"></script>
+<script defer src="/rascunho-dauer.js"></script>
+<script defer src="/dados.js"></script>
+<script defer src="/consultas-conferencia.js"></script>
+<script defer src="/continuidade.js"></script>
+<script defer src="/isbn.js"></script>
+<script defer src="/ficha-tcl.js"></script>
+<script defer src="/tcl-filtros.js"></script>
+<script defer src="/catalogo-dauer.js"></script>
+<script defer src="/furos.js"></script>
+<script defer src="/administrar-listas.js"></script>
+<script defer src="/revisao.js"></script>
+<script defer src="/acesso.js"></script>
+<script defer src="/relatorios.js"></script>
+<script defer src="/camera-bipe.js"></script>
+<script defer src="/app.js"></script>
+</body>
+</html>
