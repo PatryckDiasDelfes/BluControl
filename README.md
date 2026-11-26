@@ -45,37 +45,77 @@ Desenvolver uma plataforma que facilite o controle operacional, reduza inconsist
 ```text
 BLUCONTROL/
 │
+├── index.html
+├── app.css
+├── LEIA-ME.md
+├── MODERNIZACAO.md
+├── vercel.json
+├── firestore.indexes.json
+│
 ├── api/
 │   └── livro.js
 │
-├── vendor/
-│   └── Bibliotecas externas
+├── public/
+│   ├── assets/
+│   │   ├── fonts/
+│   │   ├── icon/
+│   │   └── images/
+│   │
+│   ├── manifest.webmanifest
+│   └── sw.js
 │
-├── index.html
-├── app.css
-├── app.js
-├── acesso.js
-├── dados.js
-├── camera-bipe.js
-├── consultas-conferencia.js
-├── catalogo-dauer.js
-├── tcl-filtros.js
-├── ficha-tcl.js
-├── furos.js
-├── isbn.js
-├── leitor-dauer.js
-├── administrar-listas.js
-├── relatorios.js
-├── revisao.js
-├── recursos.js
-├── tema.js
+├── src/
+│   │
+│   ├── core/
+│   │   ├── acesso/
+│   │   │   └── acesso.js
+│   │   │
+│   │   ├── dados/
+│   │   │   └── dados.js
+│   │   │
+│   │   ├── firebase/
+│   │   │   ├── firebase.json
+│   │   │   └── firestore.rules
+│   │   │
+│   │   └── app/
+│   │       └── app.js
+│   │
+│   ├── features/
+│   │   │
+│   │   ├── conferencia/
+│   │   │   ├── camera-bipe.js
+│   │   │   ├── consultas-conferencia.js
+│   │   │   ├── leitor-dauer.js
+│   │   │   └── continuidade.js
+│   │   │
+│   │   ├── catalogo/
+│   │   │   └── catalogo-dauer.js
+│   │   │
+│   │   ├── divergencias/
+│   │   │   └── furos.js
+│   │   │
+│   │   ├── revisao/
+│   │   │   └── revisao.js
+│   │   │
+│   │   ├── listas/
+│   │   │   └── administrar-listas.js
+│   │   │
+│   │   ├── relatorios/
+│   │   │   └── relatorios.js
+│   │   │
+│   │   └── tcl/
+│   │       ├── ficha-tcl.js
+│   │       ├── tcl-filtros.js
+│   │       └── rascunho-dauer.js
+│   │
+│   ├── shared/
+│   │   ├── isbn.js
+│   │   ├── recursos.js
+│   │   └── tema.js
+│   │
+│   └── vendor/
 │
-├── firestore.rules
-├── firestore.indexes.json
-├── firebase.json
-├── vercel.json
-├── manifest.webmanifest
-└── sw.js
+└── tests/
 ```
 
 ## 🔐 Segurança e controle de acesso
